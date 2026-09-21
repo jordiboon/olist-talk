@@ -18,8 +18,6 @@ def build(db_path: Path = DB_PATH, raw_dir: Path = RAW_DIR) -> Path:
     if missing:
         raise FileNotFoundError(f"missing CSVs in {raw_dir}: {', '.join(missing)}")
 
-    # rebuild from scratch - "create or replace" leaves tables that were removed from
-    # TABLES still sitting in the file
     db_path.parent.mkdir(parents=True, exist_ok=True)
     db_path.unlink(missing_ok=True)
     con = duckdb.connect(str(db_path))
@@ -35,7 +33,6 @@ def build(db_path: Path = DB_PATH, raw_dir: Path = RAW_DIR) -> Path:
 
 
 def connect(db_path: Path = DB_PATH) -> duckdb.DuckDBPyConnection:
-    # read_only is the security boundary: the engine refuses DDL/DML outright.
     if not db_path.exists():
         raise FileNotFoundError(f"no database at {db_path}; run: uv run python -m olist_talk.db")
     return duckdb.connect(str(db_path), read_only=True)
@@ -43,8 +40,9 @@ def connect(db_path: Path = DB_PATH) -> duckdb.DuckDBPyConnection:
 
 def count_rows(con: duckdb.DuckDBPyConnection, table: str) -> int:
     row = con.execute(f"select count(*) from {table}").fetchone()
-    return row[0] if row else 0
-
+    if row is None:
+        return 0
+    return row[0]
 
 def schema_text(con: duckdb.DuckDBPyConnection) -> str:
     parts = []
@@ -58,6 +56,24 @@ def schema_text(con: duckdb.DuckDBPyConnection) -> str:
         body = "\n".join(f"  {name}: {dtype.lower()}" for name, dtype in cols)
         parts.append(f"{table} ({n:,} rows)\n{body}")
     return "\n\n".join(parts)
+
+
+def data_facts(con: duckdb.DuckDBPyConnection) -> str:
+    row = con.execute(
+        "select min(order_purchase_timestamp), max(order_purchase_timestamp) from orders"
+    ).fetchone()
+    if row is None:
+        raise RuntimeError("orders table is empty")
+    lo, hi = row
+    statuses = con.execute(
+        "select order_status, count(*) n from orders group by 1 order by n desc"
+    ).fetchall()
+    return (
+        f"Orders span {lo:%Y-%m-%d} to {hi:%Y-%m-%d}. There is no data outside that range.\n"
+        f"order_status values: {', '.join(f'{s} ({n:,})' for s, n in statuses)}.\n"
+        "Reviews are Brazilian Portuguese free text; only ~41% have a comment_message.\n"
+        "customer_state is a two-letter Brazilian state code (SP, RJ, BA, ...)."
+    )
 
 
 if __name__ == "__main__":

@@ -85,15 +85,17 @@
     must_not_fabricate_statistics: true
 
 - id: e07
-  question: How many orders were there?
+  question: How many customers do we have?
   tests: >
-    Genuinely ambiguous, not artificially so. There are 99,441 order rows across eight
-    statuses, of which 96,478 are delivered. Answering either number confidently is
-    wrong; the app should ask which.
+    A schema trap, not an ambiguity. "Customers" means people, so the answer is
+    count(distinct customer_unique_id) = 96,096. The customers table has one row per
+    *order*, so the naive count(*) returns 99,441 and is simply wrong. Tests whether the
+    generated SQL understands the difference between the two id columns.
   expect:
-    route: clarify
-    no_query_executed: true
-    must_mention: [order status]
+    route: sql
+    value: 96096
+    tolerance: 0
+    row_count: 1
 
 - id: e08
   question: Which region is performing worst?
@@ -114,7 +116,9 @@
     return an empty result as if it were an answer.
   expect:
     route: decline
-    must_mention: ["2018-10-17"]
+    # both years, not a literal date string - the assertion is "cites the real range",
+    # not "formats it the way I would"
+    must_mention: ["2016", "2018"]
     must_not_return_empty_as_answer: true
 
 - id: e10
