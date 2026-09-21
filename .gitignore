@@ -12,3 +12,7 @@ wheels/
 # dataset (downloaded from Kaggle, not committed)
 data/
 .env
+
+# working notes and diagrams - local only
+notes/
+docs/
