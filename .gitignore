@@ -16,3 +16,6 @@ data/
 # working notes and diagrams - local only
 notes/
 docs/
+
+# logfire credentials
+.logfire/

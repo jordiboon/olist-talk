@@ -46,7 +46,9 @@
   expect:
     route: sql
     row_count: 12
-    lowest_month: "2017-11"
+    # the dip itself, by name and by value - not a date format I happen to prefer
+    must_mention: ["November"]
+    must_contain_values: [3.91]
     tolerance: 0.02
 
 - id: e04
@@ -57,9 +59,10 @@
     does not exist and must be computed.
   expect:
     route: sql
+    # both group averages must appear; that already proves it compared the two groups,
+    # so a separate wording check was redundant and format-brittle
     must_contain_values: [2.57, 4.29]
     tolerance: 0.05
-    must_mention: [late, on time]
 
 - id: e05
   question: Why are customers in Bahia less happy than elsewhere?

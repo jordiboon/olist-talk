@@ -1,7 +1,8 @@
-from . import pipeline
+from . import obs, pipeline
 
 
 def main() -> None:
+    obs.setup()
     print("Ask about the Olist data. Empty line or Ctrl-D to quit.\n")
     while True:
         try:

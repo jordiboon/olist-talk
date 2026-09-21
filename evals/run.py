@@ -7,7 +7,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from olist_talk import db  # noqa: E402
+from olist_talk import db, obs  # noqa: E402
 from olist_talk.pipeline import Trace, answer  # noqa: E402
 
 # assertions that need a judgement call, not a string match; reported, never passed silently
@@ -76,6 +76,7 @@ def check(case: dict, trace: Trace) -> list[tuple[str, bool | None, str]]:
 
 
 def main() -> int:
+    obs.setup()
     cases = yaml.safe_load((ROOT / "evals" / "questions.yaml").read_text())
     passed = failed = soft = 0
 
