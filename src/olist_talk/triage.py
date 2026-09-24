@@ -16,6 +16,9 @@ class Route(str, Enum):
 
 
 class Triage(BaseModel):
+    # first on purpose: the form is filled in order, so the language is decided straight
+    # after reading the question, before any reasoning about a Brazilian dataset
+    language: str
     route: Route
     reason: str
     reply: str
@@ -47,7 +50,11 @@ natural reading. Only clarify when a careful analyst would have to choose betwee
 readings that give materially different answers, and name those readings in `reply`.
 
 `reason` is one sentence for the log. `reply` is text shown to the user, and is empty
-unless the route is clarify, decline or refuse.
+unless the route is clarify, decline or refuse; write it in the question's language.
+`language` is the language the question is written in, named in English ("English",
+"Dutch", "Portuguese"). Questions often mix a language with English technical words
+("drop", "database", "score", "review"); decide by the grammatical words around them -
+articles, pronouns, verbs. Never infer the language from the dataset's topic.
 
 Schema:
 {schema}

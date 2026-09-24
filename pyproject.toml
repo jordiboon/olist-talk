@@ -7,11 +7,14 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "anthropic>=1.7.0",
     "duckdb>=1.5.5",
+    "fastembed>=0.8.1",
     "logfire>=5.1.0",
+    "pyarrow>=25.0.1",
+    "pydantic-ai-slim[anthropic,google]>=2.49.0",
     "python-dotenv>=1.2.3",
     "pyyaml>=6.0.3",
+    "streamlit>=1.64.0",
 ]
 
 [project.scripts]
@@ -20,3 +23,7 @@ olist-talk = "olist_talk.cli:main"
 [build-system]
 requires = ["uv_build>=0.12.15,<0.13.0"]
 build-backend = "uv_build"
+
+[[tool.mypy.overrides]]
+module = "pyarrow.*"
+ignore_missing_imports = true

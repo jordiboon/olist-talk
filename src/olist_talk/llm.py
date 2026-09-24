@@ -5,14 +5,24 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypeVar
 
-import anthropic
 from dotenv import load_dotenv
 from pydantic import BaseModel
+from pydantic_ai import Agent
+from pydantic_ai.exceptions import ModelHTTPError
 
 load_dotenv()
+os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
+MODEL = os.getenv("LLM_MODEL", "anthropic:claude-sonnet-5")
+MAX_TOKENS = 16000
+
+# "server busy / rate limited" - worth waiting for; anything else is a real error
+TRANSIENT = {429, 500, 502, 503, 529}
+ATTEMPTS = 3
 
 TRACE_PATH = Path(__file__).resolve().parents[2] / "data" / "llm_calls.jsonl"
 TRACING = os.getenv("LLM_TRACE", "1") != "0"
+
+T = TypeVar("T", bound=BaseModel)
 
 
 def _record(kind: str, system: str, user: str, output: str, usage, seconds: float) -> None:
@@ -25,51 +35,40 @@ def _record(kind: str, system: str, user: str, output: str, usage, seconds: floa
             "kind": kind,
             "model": MODEL,
             "seconds": round(seconds, 2),
-            "input_tokens": usage.input_tokens,
-            "output_tokens": usage.output_tokens,
+            "input_tokens": usage.input_tokens if usage else None,
+            "output_tokens": usage.output_tokens if usage else None,
             "system": system,
             "user": user,
             "output": output,
         }) + "\n")
 
-PROVIDER = os.getenv("LLM_PROVIDER", "anthropic")
-MODEL = os.getenv("LLM_MODEL", "claude-sonnet-5")
 
-T = TypeVar("T", bound=BaseModel)
-
-
-def _client() -> anthropic.Anthropic:
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        raise RuntimeError("ANTHROPIC_API_KEY not set - put it in .env")
-    return anthropic.Anthropic()
-
-
-def structured(system: str, user: str, schema: type[T], max_tokens: int = 1024) -> T:
-    """Ask the model for an instance of `schema`. The only place the SDK is called."""
+def _run(kind: str, system: str, user: str, output_type, model: str | None = None):
+    """The only place a model is called."""
+    agent = Agent(model or MODEL, output_type=output_type, instructions=system,
+                  model_settings={"max_tokens": MAX_TOKENS})
     t0 = time.monotonic()
-    response = _client().messages.parse(
-        model=MODEL,
-        max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-        output_format=schema,
-    )
-    _record(schema.__name__, system, user, str(response.parsed_output), response.usage,
-            time.monotonic() - t0)
-    if response.parsed_output is None:
-        raise RuntimeError(f"no structured output (stop_reason={response.stop_reason})")
-    return response.parsed_output
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            result = agent.run_sync(user)
+            break
+        except Exception as e:
+            # log failures too - otherwise the call log only ever shows successes
+            _record(kind, system, user, f"ERROR {type(e).__name__}: {e}", None, time.monotonic() - t0)
+            busy = isinstance(e, ModelHTTPError) and e.status_code in TRANSIENT
+            if not busy or attempt == ATTEMPTS:
+                raise
+            time.sleep(5 * attempt)
+    usage = result.usage() if callable(result.usage) else result.usage
+    _record(kind, system, user, str(result.output), usage, time.monotonic() - t0)
+    return result.output
 
 
-def text(system: str, user: str, max_tokens: int = 2048) -> str:
+def structured(system: str, user: str, schema: type[T], model: str | None = None) -> T:
+    """Ask the model to fill in `schema` (a form); returns a validated instance."""
+    return _run(schema.__name__, system, user, schema, model)
+
+
+def text(system: str, user: str) -> str:
     """Free-text answer, for synthesis."""
-    t0 = time.monotonic()
-    response = _client().messages.create(
-        model=MODEL,
-        max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-    )
-    out = "".join(b.text for b in response.content if b.type == "text")
-    _record("text", system, user, out, response.usage, time.monotonic() - t0)
-    return out
+    return _run("text", system, user, str)

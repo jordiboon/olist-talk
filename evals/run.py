@@ -1,17 +1,45 @@
+import os
 import re
 import sys
 from pathlib import Path
 
 import yaml
+from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from olist_talk import db, obs  # noqa: E402
-from olist_talk.pipeline import Trace, answer  # noqa: E402
+from olist_talk import db, llm, obs
+from olist_talk.pipeline import Trace, answer
 
-# assertions that need a judgement call, not a string match; reported, never passed silently
-SOFT = {"must_report_sample_size", "must_not_fabricate_statistics"}
+# assertions that need a judgement call, not a string match. Unchecked by default;
+# `--judge` asks an LLM. Never passed silently.
+SOFT = {
+    "must_report_sample_size": "If the answer names a group (such as a state) as best or "
+    "worst, it also says how many reviews or orders that result rests on.",
+    "must_not_fabricate_statistics": "The answer does not generalise from the retrieved "
+    "reviews to all customers: no percentages, proportions or 'most customers' claims about "
+    "the whole population unless that number appears in the query rows. Saying how many "
+    "reviews were retrieved, and describing recurring themes among them, is fine.",
+}
+JUDGE = "--judge" in sys.argv
+JUDGE_MODEL = os.getenv("JUDGE_MODEL", "anthropic:claude-sonnet-5")
+
+
+class Verdict(BaseModel):
+    reason: str
+    passed: bool
+
+
+def judge(criterion: str, trace: Trace) -> tuple[bool, str]:
+    v = llm.structured(
+        "You check one criterion against an answer. Judge only that criterion.",
+        f"Criterion: {criterion}\n\nQuestion: {trace.question}\n\n"
+        f"Query rows: {trace.rows or 'none'}\n\nAnswer:\n{trace.answer}",
+        Verdict,
+        model=JUDGE_MODEL,
+    )
+    return v.passed, v.reason
 
 NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 
@@ -39,7 +67,16 @@ def check(case: dict, trace: Trace) -> list[tuple[str, bool | None, str]]:
         if key == "tolerance":
             continue
         if key in SOFT:
-            add(key, None, "needs a judge")
+            if JUDGE and trace.error:
+                add(key, None, "not judged - the pipeline errored, nothing to judge")
+            elif JUDGE:
+                try:
+                    ok, reason = judge(SOFT[key], trace)
+                    add(key, ok, f"judge: {reason}")
+                except Exception as e:
+                    add(key, None, f"judge unavailable - {type(e).__name__}")
+            else:
+                add(key, None, "unchecked - run with --judge")
         elif key == "route":
             add(key, trace.route == want, f"got {trace.route or '-'}")
         elif key == "value":
@@ -75,11 +112,8 @@ def check(case: dict, trace: Trace) -> list[tuple[str, bool | None, str]]:
     return out
 
 
-def main() -> int:
-    obs.setup()
-    cases = yaml.safe_load((ROOT / "evals" / "questions.yaml").read_text())
-    passed = failed = soft = 0
-
+def run_once(cases: list[dict], verbose: bool) -> dict[str, bool]:
+    outcome = {}
     for case in cases:
         try:
             trace = answer(case["question"])
@@ -89,12 +123,11 @@ def main() -> int:
         results = check(case, trace)
         hard = [r for r in results if r[1] is not None]
         ok = bool(hard) and all(r[1] for r in hard)
-        passed += ok
-        failed += not ok
-        soft += sum(1 for r in results if r[1] is None)
+        outcome[case["id"]] = ok
+        if not verbose:
+            continue
 
-        mark = "PASS" if ok else "FAIL"
-        print(f"{mark}  {case['id']}  {case['question'][:52]:<52} [{case['expect']['route']}]")
+        print(f"{'PASS' if ok else 'FAIL'}  {case['id']}  {case['question'][:52]:<52} [{case['expect']['route']}]")
         if trace.error:
             print(f"        error: {trace.error}")
         for name, res, detail in results:
@@ -102,9 +135,36 @@ def main() -> int:
                 print(f"        x {name} {detail}")
             elif res is None:
                 print(f"        ? {name} {detail}")
+            elif detail.startswith("judge:"):
+                print(f"        v {name} {detail}")
+    return outcome
 
-    print(f"\n{passed} passed, {failed} failed, {soft} unchecked (need a judge)")
-    return 1 if failed else 0
+
+def main() -> int:
+    # --repeat N: one green run proves little when the model can write different SQL each
+    # time, so report how often each case passes instead
+    repeat = int(sys.argv[sys.argv.index("--repeat") + 1]) if "--repeat" in sys.argv else 1
+    obs.setup()
+    cases = yaml.safe_load((ROOT / "evals" / "questions.yaml").read_text())
+
+    runs = []
+    for i in range(repeat):
+        if repeat > 1:
+            print(f"run {i + 1}/{repeat}...", flush=True)
+        runs.append(run_once(cases, verbose=repeat == 1))
+
+    if repeat == 1:
+        passed = sum(runs[0].values())
+        print(f"\n{passed} passed, {len(cases) - passed} failed")
+        return 0 if passed == len(cases) else 1
+
+    print()
+    for case in cases:
+        n = sum(run[case["id"]] for run in runs)
+        print(f"{case['id']}  {n}/{repeat}  {'#' * n}{'.' * (repeat - n)}  {case['question'][:55]}")
+    total = sum(sum(run.values()) for run in runs)
+    print(f"\noverall: {total}/{len(cases) * repeat} ({100 * total / (len(cases) * repeat):.0f}%)")
+    return 0
 
 
 if __name__ == "__main__":

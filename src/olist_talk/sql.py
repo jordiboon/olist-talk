@@ -63,7 +63,7 @@ def run(question: str, con: duckdb.DuckDBPyConnection) -> Result:
     last_error: Exception | None = None
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        query = llm.structured(system, prompt, Query, max_tokens=2048)
+        query = llm.structured(system, prompt, Query)
         try:
             validate(query.sql)
             cursor = con.execute(query.sql)

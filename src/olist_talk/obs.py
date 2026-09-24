@@ -13,5 +13,5 @@ def setup() -> None:
         send_to_logfire="if-token-present",
         console=False,
     )
-    logfire.instrument_anthropic()
+    logfire.instrument_pydantic_ai()
     _done = True

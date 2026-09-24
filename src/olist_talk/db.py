@@ -27,6 +27,18 @@ def build(db_path: Path = DB_PATH, raw_dir: Path = RAW_DIR) -> Path:
                 f"create table {table} as "
                 f"select * from read_csv('{(raw_dir / filename).as_posix()}')"
             )
+
+        from . import embed  # lazy: fastembed is only needed at build time
+
+        added = embed.update_cache(raw_dir / TABLES["order_reviews"])
+        if added:
+            print(f"embedded {added:,} new reviews")
+        con.execute(
+            f"create table review_embeddings as select review_id, "
+            f"embedding::float[{embed.DIM}] as embedding "
+            f"from read_parquet('{embed.CACHE.as_posix()}') "
+            f"where review_id in (select review_id from order_reviews)"
+        )
     finally:
         con.close()
     return db_path
@@ -72,7 +84,19 @@ def data_facts(con: duckdb.DuckDBPyConnection) -> str:
         f"Orders span {lo:%Y-%m-%d} to {hi:%Y-%m-%d}. There is no data outside that range.\n"
         f"order_status values: {', '.join(f'{s} ({n:,})' for s, n in statuses)}.\n"
         "Reviews are Brazilian Portuguese free text; only ~41% have a comment_message.\n"
-        "customer_state is a two-letter Brazilian state code (SP, RJ, BA, ...)."
+        "customer_state is a two-letter Brazilian state code (SP, RJ, BA, ...).\n"
+        "\n"
+        "Definitions - use these, do not invent alternatives:\n"
+        "- An order is late when it was delivered on a later calendar day than estimated:\n"
+        "  order_delivered_customer_date::date > order_estimated_delivery_date::date.\n"
+        "  Estimated dates have no time of day, so comparing full timestamps would wrongly\n"
+        "  count same-day deliveries as late. Only delivered orders can be late or on time.\n"
+        "- A late rate is a share of delivered orders, counting each order once - compute it\n"
+        "  on orders before joining reviews, which would count some orders twice.\n"
+        "- A customer is a person: count customer_unique_id. customer_id is one per order,\n"
+        "  so the same person appears under several customer_ids.\n"
+        "- Change over time is measured by the order's purchase date\n"
+        "  (order_purchase_timestamp), unless the question asks when reviews were written."
     )
 
 

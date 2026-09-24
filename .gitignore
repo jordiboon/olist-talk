@@ -21,3 +21,5 @@ docs/
 .logfire/
 
 .vscode/
+# macOS
+.DS_Store
