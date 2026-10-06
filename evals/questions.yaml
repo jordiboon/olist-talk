@@ -1,15 +1,4 @@
-# Eval set for olist-talk - THE TEST SUITE. This file runs.
-#
-# Not to be confused with notes/question-space.md, which is the design rationale for the
-# schema and never executes. This file is pass/fail; that file is a justification.
-#
-# Written BEFORE the app worked. Each case pins down expected *behaviour*, not just an
-# expected number: the route the triage step should pick, and what a correct response
-# must contain. Five of the ten must NOT produce an answer — declining well is a feature.
-#
-# Reference values were computed by hand against the raw CSVs on 2026-09-20 and are
-# recorded in notes/log.md. Tolerances are deliberately loose: we are testing whether the
-# app found the right rows, not whether it rounds the way I do.
+# Eval set for olist-talk
 #
 # route vocabulary:
 #   sql      - answerable by a single generated query
@@ -116,8 +105,6 @@
     return an empty result as if it were an answer.
   expect:
     route: decline
-    # both years, not a literal date string - the assertion is "cites the real range",
-    # not "formats it the way I would"
     must_mention: ["2016", "2018"]
     must_not_return_empty_as_answer: true
 
